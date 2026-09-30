@@ -1,0 +1,6 @@
+qdrant-client
+streamlit
+sentence-transformers
+pandas
+plotly
+scikit-learn

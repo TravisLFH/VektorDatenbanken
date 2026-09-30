@@ -1,0 +1,3 @@
+[server]
+# Polling erkennt Änderungen, ohne Transformers-Module per Import zu inspizieren.
+fileWatcherType = "poll"
