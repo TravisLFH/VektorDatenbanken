@@ -48,6 +48,11 @@ with st.sidebar.expander("Datenverwaltung", icon=":material/database:"):
         st.toast(f"{count} Beispieldaten für {st.session_state.active_user} eingefügt.")
         st.rerun()
 
+    if st.button("Suchvektoren neu erzeugen", icon=":material/sync:", width="stretch"):
+        count = st.session_state.db.reindex_user_data(st.session_state.active_user)
+        st.toast(f"{count} Suchvektoren für {st.session_state.active_user} aktualisiert.")
+        st.rerun()
+
     if st.button("Daten des aktuellen Nutzers löschen", icon=":material/person_remove:", width="stretch"):
         st.session_state.db.delete_user_data(st.session_state.active_user)
         st.toast(f"Alle Daten von {st.session_state.active_user} wurden gelöscht.")

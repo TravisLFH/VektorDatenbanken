@@ -12,11 +12,13 @@ Core concepts demonstrated here:
 """
 
 import uuid
-from typing import List, Optional
+from typing import TYPE_CHECKING, List, Optional
 
 from qdrant_client import QdrantClient
 from qdrant_client.http import models
-from sentence_transformers import SentenceTransformer
+
+if TYPE_CHECKING:
+    from sentence_transformers import SentenceTransformer
 
 
 class VectorDBManager:
@@ -31,12 +33,14 @@ class VectorDBManager:
     def __init__(self, host: str = "localhost", port: int = 6333):
         self.client = QdrantClient(host=host, port=port)
         # Loading the transformer is deferred until a vector is actually needed.
-        self.encoder: Optional[SentenceTransformer] = None
+        self.encoder: Optional["SentenceTransformer"] = None
         self.vector_size = self.EMBEDDING_DIMENSION
 
-    def _get_encoder(self) -> SentenceTransformer:
+    def _get_encoder(self) -> "SentenceTransformer":
         """Loads the embedding model on first use and reuses it afterwards."""
         if self.encoder is None:
+            from sentence_transformers import SentenceTransformer
+
             self.encoder = SentenceTransformer(self.EMBEDDING_MODEL_NAME)
         return self.encoder
 
@@ -67,6 +71,11 @@ class VectorDBManager:
         """Converts a text string into a vector embedding."""
         return self._get_encoder().encode(text).tolist()
 
+    @staticmethod
+    def _embedding_text(name: str, description: str) -> str:
+        """Combines the searchable object name with its description."""
+        return f"{name}. {description}"
+
     def embed_text(self, text: str) -> List[float]:
         """Creates the embedding used for a query or a stored description."""
         return self._embed(text)
@@ -78,7 +87,7 @@ class VectorDBManager:
             The generated UUID of the newly created point.
         """
         point_id = str(uuid.uuid4())
-        vector = self._embed(description)
+        vector = self._embed(self._embedding_text(name, description))
 
         self.client.upsert(
             collection_name=self.COLLECTION_NAME,
@@ -102,7 +111,7 @@ class VectorDBManager:
         Since the description text changes, the embedding is recomputed
         so that search results stay semantically accurate.
         """
-        vector = self._embed(description)
+        vector = self._embed(self._embedding_text(name, description))
 
         self.client.upsert(
             collection_name=self.COLLECTION_NAME,
@@ -218,6 +227,18 @@ class VectorDBManager:
             collection_name=self.COLLECTION_NAME,
             points_selector=models.FilterSelector(filter=user_filter),
         )
+
+    def reindex_user_data(self, user_id: str) -> int:
+        """Recreates vectors for existing records after embedding changes."""
+        objects = self.get_all_for_user(user_id)
+        for obj in objects:
+            self.update_data(
+                point_id=obj["id"],
+                name=obj["name"],
+                description=obj["description"],
+                user_id=user_id,
+            )
+        return len(objects)
 
     def delete_all_data(self) -> None:
         """Wipes the entire collection (all users) and recreates it empty."""

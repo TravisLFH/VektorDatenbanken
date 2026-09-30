@@ -33,7 +33,7 @@ st.markdown("So läuft in dieser Demo jeder Einfüge- und jeder Suchvorgang ab:"
 st.mermaid_chart(
     """
     flowchart LR
-        A["Text\\n'Ein roter Planet mit Stürmen'"] --> B["Embedding-Modell\\n(all-MiniLM-L6-v2)"]
+        A["Text\\n'Eine Person mit technischem Beruf'"] --> B["Embedding-Modell\\n(paraphrase-multilingual-MiniLM-L12-v2)"]
         B --> C["Vektor\\n[0.12, -0.04, ..., 0.31]\\n(384 Dimensionen)"]
         C --> D[("Qdrant-Collection\\n'space_objects'")]
         E["Suchanfrage-Text"] --> B
@@ -91,17 +91,32 @@ def build_illustration_plot() -> pd.DataFrame:
     """Builds a tiny illustrative point cloud without touching the live
     database, so this page works even with an empty collection."""
     # Pre-computed toy 4D "embeddings" standing in for real 384D vectors,
-    # deliberately grouped so planets/space and fruits form visible clusters.
+    # deliberately grouped so the four example categories form visible clusters.
     rng = np.random.default_rng(seed=42)
-    space_terms = ["Mars", "Jupiter", "Saturn", "Komet", "Galaxie"]
-    fruit_terms = ["Apfel", "Banane", "Orange", "Traube", "Mango"]
+    category_terms = {
+        "Menschen": ["Ärztin", "Lehrer", "Fotograf", "Architektin"],
+        "Studierende": ["Informatikstudentin", "Maschinenbaustudent", "Psychologiestudentin", "Biologiestudent"],
+        "Gegenstände": ["Kaffeemaschine", "Fahrrad", "Lampe", "Bücher"],
+        "Möbel": ["Schreibtisch", "Bürostuhl", "Bücherregal", "Sofa"],
+    }
+    category_centers = {
+        "Menschen": (2.0, 2.0),
+        "Studierende": (2.0, -2.0),
+        "Gegenstände": (-2.0, 2.0),
+        "Möbel": (-2.0, -2.0),
+    }
 
-    space_points = rng.normal(loc=2.0, scale=0.3, size=(len(space_terms), 4))
-    fruit_points = rng.normal(loc=-2.0, scale=0.3, size=(len(fruit_terms), 4))
+    vectors_list = []
+    labels = []
+    categories = []
+    for category, terms in category_terms.items():
+        center_x, center_y = category_centers[category]
+        center = np.array([center_x, center_y, 0.0, 0.0])
+        vectors_list.append(rng.normal(loc=center, scale=0.3, size=(len(terms), 4)))
+        labels.extend(terms)
+        categories.extend([category] * len(terms))
 
-    vectors = np.vstack([space_points, fruit_points])
-    labels = space_terms + fruit_terms
-    categories = ["Weltraumobjekt"] * len(space_terms) + ["Frucht"] * len(fruit_terms)
+    vectors = np.vstack(vectors_list)
 
     coords_2d = PCA(n_components=2).fit_transform(vectors)
     return pd.DataFrame(
@@ -121,7 +136,8 @@ fig = px.scatter(
 fig.update_traces(textposition="top center", marker=dict(size=12))
 st.plotly_chart(fig, width="stretch")
 st.caption(
-    "Man erkennt zwei klare Cluster: Weltraumobjekte gruppieren sich, Früchte "
-    "gruppieren sich - obwohl keine explizite Kategorie zur Platzierung genutzt wurde."
+    "Die vier Beispielgruppen liegen in unterschiedlichen Bereichen: Menschen, "
+    "Studierende, Gegenstände und Möbel. Die Kategorien dienen hier nur zur "
+    "Lesbarkeit der künstlichen Illustration."
 )
 

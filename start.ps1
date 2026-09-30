@@ -35,4 +35,4 @@ if ($RequirementsHash -ne $InstalledHash) {
 }
 
 Write-Host "==> Starte Streamlit-App..." -ForegroundColor Cyan
-streamlit run "$ProjectRoot\streamlit_app.py" --server.fileWatcherType poll
+streamlit run "$ProjectRoot\streamlit_app.py" --server.fileWatcherType auto

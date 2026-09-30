@@ -129,7 +129,11 @@ query = st.text_input(
 )
 
 if query:
-    results = db.search_data(query_text=query, user_id=active_user, limit=10)
+    results = db.search_data(
+        query_text=query,
+        user_id=active_user,
+        limit=max(len(user_objects), 1),
+    )
     if results:
         df_results = pd.DataFrame(results)[["name", "description", "score"]]
         df_results["score"] = df_results["score"].round(4)
