@@ -6,9 +6,11 @@ Explains the multi-user data isolation mechanism used throughout the demo.
 
 import streamlit as st
 
-st.caption("Wie diese Demo sicherstellt, dass ein Nutzer niemals die Daten eines anderen Nutzers sieht.")
+from ui.components import page_header, section
 
-st.header("Das Problem: gemeinsame Infrastruktur, private Daten", divider="gray")
+page_header("Mehrbenutzer-Trennung", "Wie serverseitige Filter verhindern, dass Nutzer fremde Daten sehen.")
+
+section("Gemeinsame Infrastruktur, private Daten", "Warum eine Collection trotzdem mehrere Nutzer sicher unterstützen kann.")
 st.markdown(
     """
     In einer echten Anwendung teilen sich viele Nutzer (bzw.
@@ -20,7 +22,7 @@ st.markdown(
     """
 )
 
-st.header("Wie es umgesetzt ist", divider="gray")
+section("Wie es umgesetzt ist", "Jeder Punkt trägt seine Nutzerzugehörigkeit im Payload.")
 st.markdown(
     """
     Jeder Punkt in der Collection `space_objects` trägt neben `name` und
@@ -69,7 +71,7 @@ response = client.query_points(
     language="python",
 )
 
-st.header("Wo das in der App erzwungen wird", divider="gray")
+section("Wo die Trennung erzwungen wird", "Alle Lese- und Schreibpfade verwenden denselben Besitzfilter.")
 st.markdown(
     """
     - **`search_data()`** - die semantische Suche bewertet nur Punkte des aktiven Nutzers.
@@ -78,7 +80,7 @@ st.markdown(
     """
 )
 
-st.header("Warum serverseitig statt clientseitig filtern?", divider="gray")
+section("Warum serverseitig filtern?", "Fremde Daten werden gar nicht erst an die Oberfläche übertragen.")
 st.markdown(
     """
     Der Filter wird an Qdrant übergeben und **innerhalb der Datenbank**

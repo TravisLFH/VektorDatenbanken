@@ -9,11 +9,19 @@ the selected page. All pages read `st.session_state.db` and
 `st.session_state.active_user`.
 """
 
+import logging
+
 import streamlit as st
 
+from app_state import init_state, record_activity, reset_user_state
 from database import VectorDBManager
+from errors import CollectionConfigurationError, DatabaseUnavailableError, EmbeddingModelError
+from ui.components import activity_log
 
-st.set_page_config(page_title="Weltraumobjekte Vektordatenbank Demo", layout="wide", page_icon=":material/public:")
+logger = logging.getLogger(__name__)
+
+st.set_page_config(page_title="Vektordatenbank Demo", layout="wide", page_icon=":material/public:")
+init_state()
 
 
 @st.cache_resource
@@ -22,48 +30,55 @@ def get_db_manager() -> VectorDBManager:
     session (loading the embedding model is expensive, so we cache it)."""
     manager = VectorDBManager()
     manager.create_collection()
+    manager.warm_up_model()
     return manager
 
 
-st.session_state.db = get_db_manager()
+try:
+    with st.spinner("Embedding-Modell wird aus dem lokalen Cache geladen ..."):
+        st.session_state.db = get_db_manager()
+except EmbeddingModelError as exc:
+    logger.warning("Embedding-Modell konnte nicht initialisiert werden: %s", exc)
+    st.error("Das Embedding-Modell konnte nicht aus dem lokalen Cache geladen werden.")
+    st.info("Prüfe den lokalen Hugging-Face-Cache und starte die Anwendung danach erneut.")
+    if st.button("Erneut versuchen", icon=":material/refresh:"):
+        get_db_manager.clear()
+        st.rerun()
+    st.stop()
+except (DatabaseUnavailableError, CollectionConfigurationError) as exc:
+    logger.warning("Datenbankinitialisierung fehlgeschlagen: %s", exc)
+    st.error("Qdrant ist derzeit nicht erreichbar oder inkompatibel.")
+    st.info("Starte den Dienst mit `docker compose up -d` und prüfe anschließend erneut.")
+    if st.button("Verbindung erneut prüfen", icon=":material/refresh:"):
+        get_db_manager.clear()
+        st.rerun()
+    st.stop()
+
+def _on_user_change() -> None:
+    selected_user = st.session_state.active_user_selector
+    if selected_user != st.session_state.active_user:
+        st.session_state.active_user = selected_user
+        record_activity("Nutzerwechsel", f"Ansicht auf {selected_user} gewechselt.", selected_user)
+        reset_user_state()
+
 
 # ---------------------------------------------------------------------------
 # Sidebar: active user selection (drives multi-user filtering on every page)
 # ---------------------------------------------------------------------------
 st.sidebar.header("Aktiver Nutzer", divider="gray")
-st.session_state.active_user = st.sidebar.selectbox(
-    "Aktiven Nutzer wählen", ["Nutzer A", "Nutzer B"], label_visibility="collapsed"
+st.sidebar.selectbox(
+    "Aktiven Nutzer wählen",
+    ["Nutzer A", "Nutzer B"],
+    key="active_user_selector",
+    on_change=_on_user_change,
+    label_visibility="collapsed",
 )
 st.sidebar.caption(
     f"Alle angezeigten Daten sind auf **{st.session_state.active_user}** gefiltert. "
     "Qdrant erzwingt diese Trennung serverseitig über einen Payload-Filter auf `user_id`."
 )
-
-# ---------------------------------------------------------------------------
-# Sidebar: data management ("danger zone")
-# ---------------------------------------------------------------------------
-with st.sidebar.expander("Datenverwaltung", icon=":material/database:"):
-    if st.button("Demodaten für aktuellen Nutzer hinzufügen", icon=":material/auto_awesome:", width="stretch"):
-        count = st.session_state.db.seed_demo_data(st.session_state.active_user)
-        st.toast(f"{count} Beispieldaten für {st.session_state.active_user} eingefügt.")
-        st.rerun()
-
-    if st.button("Suchvektoren neu erzeugen", icon=":material/sync:", width="stretch"):
-        count = st.session_state.db.reindex_user_data(st.session_state.active_user)
-        st.toast(f"{count} Suchvektoren für {st.session_state.active_user} aktualisiert.")
-        st.rerun()
-
-    if st.button("Daten des aktuellen Nutzers löschen", icon=":material/person_remove:", width="stretch"):
-        st.session_state.db.delete_user_data(st.session_state.active_user)
-        st.toast(f"Alle Daten von {st.session_state.active_user} wurden gelöscht.")
-        st.rerun()
-
-    if st.button("ALLE Daten löschen (alle Nutzer)", icon=":material/delete_forever:", width="stretch"):
-        st.session_state.db.delete_all_data()
-        st.toast("Alle Daten aller Nutzer wurden gelöscht.")
-        st.rerun()
-
-    st.caption(f"Gespeicherte Objekte insgesamt (alle Nutzer): **{st.session_state.db.count_all()}**")
+with st.sidebar:
+    activity_log()
 
 # ---------------------------------------------------------------------------
 # Navigation
@@ -71,13 +86,9 @@ with st.sidebar.expander("Datenverwaltung", icon=":material/database:"):
 page = st.navigation(
     [
         st.Page("app_pages/demo.py", title="Interaktive Demo", icon=":material/rocket_launch:"),
-        st.Page("app_pages/features.py", title="Funktionen", icon=":material/checklist:"),
-        st.Page("app_pages/vector_db_explained.py", title="Wie Vektordatenbanken funktionieren", icon=":material/hub:"),
-        st.Page("app_pages/multi_user.py", title="Mehrbenutzer-Trennung", icon=":material/group:"),
     ],
     position="top",
 )
 
-st.title(page.title, icon=page.icon)
 page.run()
 

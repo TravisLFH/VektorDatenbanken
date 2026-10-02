@@ -11,9 +11,12 @@ import plotly.express as px
 import streamlit as st
 from sklearn.decomposition import PCA
 
-st.caption("Die Theorie hinter dieser Demo: was Vektordatenbanken sind und wie sie ähnliche Elemente finden.")
+from ui.components import page_header, section
+from ui.theme import apply_chart_style
 
-st.header("Was ist eine Vektordatenbank?", divider="gray")
+page_header("Vektordatenbank erklärt", "Die Theorie hinter Embeddings, Ähnlichkeitssuche und PCA.")
+
+section("Was ist eine Vektordatenbank?", "Semantische Inhalte werden als Punkte in einem hochdimensionalen Raum gespeichert.")
 st.markdown(
     """
     Eine **Vektordatenbank** speichert Daten als hochdimensionale
@@ -28,7 +31,7 @@ st.markdown(
     """
 )
 
-st.header("Ablauf von Anfang bis Ende", divider="gray")
+section("Ablauf von Anfang bis Ende", "So läuft ein Einfüge- und Suchvorgang in dieser Demo ab.")
 st.markdown("So läuft in dieser Demo jeder Einfüge- und jeder Suchvorgang ab:")
 st.mermaid_chart(
     """
@@ -41,7 +44,7 @@ st.mermaid_chart(
     """
 )
 
-st.header("Wie die Ähnlichkeitssuche funktioniert", divider="gray")
+section("Wie die Ähnlichkeitssuche funktioniert", "Qdrant vergleicht Vektoren anhand ihrer Kosinus-Ähnlichkeit.")
 st.markdown(
     """
     Sobald ein Text als Vektor vorliegt, vergleicht Qdrant den
@@ -56,7 +59,7 @@ st.markdown(
     """
 )
 
-st.header("Warum nicht einfach eine normale (relationale) Datenbank?", divider="gray")
+section("Relationale Datenbank oder Vektordatenbank?", "Beide Systeme lösen unterschiedliche Arten von Suchaufgaben.")
 col1, col2 = st.columns(2)
 with col1:
     st.subheader("Relationale Datenbank", divider="gray")
@@ -79,7 +82,7 @@ with col2:
         """
     )
 
-st.header("Live-Beispiel: Clustering nach Bedeutung", divider="gray")
+section("Live-Beispiel: Clustering nach Bedeutung", "Eine feste Illustration zeigt, wie Gruppen im Vektorraum entstehen.")
 st.markdown(
     "Eine kleine, feste Menge an Beispielbegriffen, eingebettet und mit PCA auf 2D projiziert, "
     "um Clustering unabhängig von deinen eigenen gespeicherten Daten zu veranschaulichen:"
@@ -134,7 +137,7 @@ fig = px.scatter(
     title="Illustrative Embedding-Cluster (Beispieldaten)",
 )
 fig.update_traces(textposition="top center", marker=dict(size=12))
-st.plotly_chart(fig, width="stretch")
+st.plotly_chart(apply_chart_style(fig), width="stretch")
 st.caption(
     "Die vier Beispielgruppen liegen in unterschiedlichen Bereichen: Menschen, "
     "Studierende, Gegenstände und Möbel. Die Kategorien dienen hier nur zur "

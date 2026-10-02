@@ -8,7 +8,24 @@ $ProjectRoot = $PSScriptRoot
 Set-Location $ProjectRoot
 
 Write-Host "==> Starte Qdrant via Docker Compose..." -ForegroundColor Cyan
+if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
+    throw "Docker wurde nicht gefunden. Installiere Docker Desktop und starte es zuerst."
+}
 docker compose up -d
+
+Write-Host "==> Warte auf den Qdrant-Healthcheck..." -ForegroundColor Cyan
+$Deadline = (Get-Date).AddSeconds(60)
+do {
+    try {
+        $Health = Invoke-RestMethod -Uri "http://127.0.0.1:6333/healthz" -TimeoutSec 3
+        if ($Health) { break }
+    } catch {
+        if ((Get-Date) -ge $Deadline) {
+            throw "Qdrant wurde innerhalb von 60 Sekunden nicht gesund. Prüfe: docker compose logs qdrant"
+        }
+    }
+    Start-Sleep -Seconds 2
+} while ((Get-Date) -lt $Deadline)
 
 $VenvPath = Join-Path $ProjectRoot ".venv"
 $VenvActivate = Join-Path $VenvPath "Scripts\Activate.ps1"
@@ -35,4 +52,10 @@ if ($RequirementsHash -ne $InstalledHash) {
 }
 
 Write-Host "==> Starte Streamlit-App..." -ForegroundColor Cyan
-streamlit run "$ProjectRoot\streamlit_app.py" --server.fileWatcherType auto
+# Hugging Face darf nur den bereits vorhandenen lokalen Modell-Cache verwenden.
+$env:HF_HUB_OFFLINE = "1"
+$env:TRANSFORMERS_OFFLINE = "1"
+# Qdrant schreibt beim Einfuegen viele interne Dateien in qdrant_storage. Ein
+# Streamlit-Dateiwatcher wuerde diese Schreibvorgaenge als Codeaenderungen
+# behandeln und eine Fehlerflut bzw. unnoetige Reruns ausloesen.
+streamlit run "$ProjectRoot\streamlit_app.py"

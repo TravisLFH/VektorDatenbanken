@@ -1,3 +1,12 @@
 [server]
-# Automatisches Neuladen bei Änderungen an Python-Dateien aktivieren.
-fileWatcherType = "auto"
+# Qdrant schreibt beim Einfuegen interne Dateien in qdrant_storage.
+# Der Watcher soll diese Datenbank-Schreibvorgaenge nicht als Codeaenderungen
+# behandeln. Fuer Codeaenderungen die App neu starten.
+fileWatcherType = "none"
+
+[theme]
+primaryColor = "#0f766e"
+backgroundColor = "#f8fafc"
+secondaryBackgroundColor = "#eef2f3"
+textColor = "#24313a"
+font = "sans serif"

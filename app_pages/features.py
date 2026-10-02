@@ -7,9 +7,11 @@ audiences who are new to vector databases.
 
 import streamlit as st
 
-st.caption("Ein Überblick über alle Funktionen dieser Anwendung und warum sie wichtig sind.")
+from ui.components import page_header, section
 
-st.header("Dateneingabe & Embedding", divider="gray")
+page_header("Funktionen", "Ein kompakter Überblick über die Arbeitsweise und Möglichkeiten dieser Demo.")
+
+section("Dateneingabe und Embedding", "Wie aus Text ein durchsuchbarer Eintrag wird.")
 st.markdown(
     """
     Auf der Seite **Interaktive Demo** kannst du den **Namen** und eine
@@ -23,7 +25,7 @@ st.markdown(
     """
 )
 
-st.header("Bearbeiten bestehender Objekte", divider="gray")
+section("Einträge bearbeiten", "Änderungen bleiben über die UUID eindeutig zugeordnet.")
 st.markdown(
     """
     Wählst du ein bestehendes Objekt aus der Tabelle aus, wird es zurück in
@@ -35,7 +37,7 @@ st.markdown(
     """
 )
 
-st.header("Semantische Suche", divider="gray")
+section("Semantische Suche", "Suche nach Bedeutung statt nur nach Wörtern.")
 st.markdown(
     """
     Das Suchfeld sucht nicht nach passenden Schlüsselwörtern. Deine Anfrage
@@ -49,7 +51,7 @@ st.markdown(
     """
 )
 
-st.header("Vektorraum-Visualisierung", divider="gray")
+section("Vektorraum-Visualisierung", "PCA macht hochdimensionale Embeddings sichtbar.")
 st.markdown(
     """
     Embeddings haben in dieser Demo 384 Dimensionen - unmöglich, sie direkt
@@ -62,7 +64,7 @@ st.markdown(
     """
 )
 
-st.header("Mehrbenutzer-Datentrennung", divider="gray")
+section("Mehrbenutzer-Datentrennung", "Jeder Nutzer sieht ausschließlich seine eigenen Einträge.")
 st.markdown(
     """
     Jede Operation - Einfügen, Aktualisieren, Suchen und Visualisieren - ist
@@ -72,7 +74,7 @@ st.markdown(
     """
 )
 
-st.header("Werkzeuge zur Datenverwaltung", divider="gray")
+section("Datenverwaltung", "Demo-Daten, Re-Embedding und bestätigte Löschaktionen.")
 st.markdown(
     """
     Das Panel **Datenverwaltung** in der Seitenleiste erlaubt einen

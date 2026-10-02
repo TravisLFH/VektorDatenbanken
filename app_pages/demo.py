@@ -1,10 +1,7 @@
-"""
-app_pages/demo.py
------------------
-Interactive demo page: insert/update space objects, run semantic search,
-visualize the vector space, and manage demo data - all scoped to the
-active user selected in the sidebar (see streamlit_app.py).
-"""
+"""Interaktive Demo mit Einträgen, Suche, Vektorraum und Datenverwaltung."""
+from __future__ import annotations
+
+import logging
 
 import numpy as np
 import pandas as pd
@@ -12,262 +9,309 @@ import plotly.express as px
 import streamlit as st
 from sklearn.decomposition import PCA
 
+from app_state import mark_data_changed, record_activity
+from data_access import load_user_objects, run_user_search
+from demo_data import DEMO_SUCHANFRAGEN
+from errors import EntryNotFoundError, ValidationError
+from ui.components import empty_state, entry_row, page_header, section
+from ui.theme import apply_chart_style
+
+logger = logging.getLogger(__name__)
 db = st.session_state.db
 active_user = st.session_state.active_user
 
-st.caption("Daten anlegen, semantisch suchen und den Vektorraum für den aktuell aktiven Nutzer betrachten.")
 
-# ---------------------------------------------------------------------------
-# Section: Data entry (insert new object or update an existing one)
-# ---------------------------------------------------------------------------
-st.header("1. Weltraumobjekt anlegen oder bearbeiten", divider="gray")
+def _reset_search() -> None:
+    st.session_state.search_nonce += 1
+    st.session_state.last_search_query = ""
+    st.session_state.search_query_input = ""
+    st.session_state.search_suggestion = ""
 
-# Keep track of which point (by UUID) is being edited, if any.
-if "editing_point_id" not in st.session_state:
-    st.session_state.editing_point_id = None
 
-with st.form("data_entry_form", clear_on_submit=False):
-    col1, col2 = st.columns([1, 2])
-    with col1:
-        planet_name = st.text_input("Name", key="form_name")
-    with col2:
-        planet_description = st.text_area("Beschreibung", key="form_description")
-
-    button_row = st.container(horizontal=True)
-    insert_clicked = button_row.form_submit_button("Als neu einfügen", icon=":material/add:")
-    update_clicked = button_row.form_submit_button("Auswahl aktualisieren", icon=":material/edit:")
-
-    if insert_clicked:
-        if planet_name and planet_description:
-            new_id = db.insert_data(planet_name, planet_description, active_user)
-            st.success(f"'{planet_name}' für {active_user} eingefügt (ID: {new_id})")
-        else:
-            st.warning("Bitte Name und Beschreibung angeben.")
-
-    if update_clicked:
-        if not st.session_state.editing_point_id:
-            st.warning("Bitte zuerst ein Objekt aus der Tabelle unten auswählen.")
-        elif planet_name and planet_description:
-            db.update_data(
-                st.session_state.editing_point_id,
-                planet_name,
-                planet_description,
+@st.dialog("Eintrag löschen")
+def _delete_dialog(entry: dict) -> None:
+    st.markdown(f"**{entry.get('name', 'Ohne Namen')}**")
+    st.caption(entry.get("description", "Keine Beschreibung"))
+    st.warning("Diese Aktion kann nicht rückgängig gemacht werden.")
+    confirm_col, cancel_col = st.columns(2)
+    if confirm_col.button("Endgültig löschen", type="primary", icon=":material/delete_forever:", width="stretch"):
+        try:
+            db.delete_data(entry["id"], active_user)
+            record_activity(
+                "Löschen",
+                f"Eintrag '{entry.get('name', 'Ohne Namen')}' wurde aus der Datenbank gelöscht.",
                 active_user,
             )
-            st.success(f"'{planet_name}' wurde aktualisiert.")
-        else:
-            st.warning("Bitte Name und Beschreibung angeben.")
+            mark_data_changed()
+            st.session_state.pending_delete_id = None
+            st.toast("Eintrag gelöscht.")
+            st.rerun()
+        except EntryNotFoundError:
+            st.error("Der Eintrag existiert nicht mehr oder gehört nicht zum aktiven Nutzer.")
+        except Exception:
+            logger.exception("Eintrag konnte nicht gelöscht werden.")
+            st.error("Der Eintrag konnte nicht gelöscht werden. Prüfe die Qdrant-Verbindung.")
+    if cancel_col.button("Abbrechen", width="stretch"):
+        st.session_state.pending_delete_id = None
+        st.rerun()
 
-# ---------------------------------------------------------------------------
-# Section: Browse existing objects for the active user (select to edit)
-# ---------------------------------------------------------------------------
-st.header("2. Vorhandene Objekte des aktuellen Nutzers", divider="gray")
 
-user_objects = db.get_all_for_user(active_user)
-
-# Precompute the 2D PCA projection once so it can be reused both by the
-# per-object vector inspector below and by the plot in section 4.
-coords_2d_by_id = {}
-if len(user_objects) >= 2:
-    vectors = [o["vector"] for o in user_objects]
-    coords_2d = PCA(n_components=2).fit_transform(vectors)
-    coords_2d_by_id = {o["id"]: coords_2d[i] for i, o in enumerate(user_objects)}
-
-if user_objects:
-    df_objects = pd.DataFrame(
-        [{"id": o["id"], "name": o["name"], "description": o["description"]} for o in user_objects]
-    )
-    selected_name = st.selectbox(
-        "Objekt zum Bearbeiten in das Formular laden",
-        ["-- keine Auswahl --"] + df_objects["name"].tolist(),
-    )
-    if selected_name != "-- keine Auswahl --":
-        selected_row = df_objects[df_objects["name"] == selected_name].iloc[0]
-        st.session_state.editing_point_id = selected_row["id"]
-        st.caption(f"Bearbeitete Punkt-ID: `{selected_row['id']}`")
-
-        show_vector = st.toggle("Vollständigen Vektor des ausgewählten Objekts anzeigen", key="show_vector")
-        if show_vector:
-            view_mode = st.segmented_control(
-                "Ansicht",
-                ["384D (Rohvektor)", "2D (PCA-Projektion)"],
-                default="384D (Rohvektor)",
-                label_visibility="collapsed",
+def _render_entry_form(objects_by_id: dict[str, dict]) -> None:
+    editing_id = st.session_state.editing_point_id
+    editing_entry = objects_by_id.get(editing_id) if editing_id else None
+    should_scroll = st.session_state.pop("scroll_to_entry_form", False)
+    st.markdown('<div id="entry-form-anchor"></div>', unsafe_allow_html=True)
+    if should_scroll:
+        st.html(
+            """
+            <script>
+            requestAnimationFrame(() => {
+                document.getElementById("entry-form-anchor")?.scrollIntoView({
+                    behavior: "smooth",
+                    block: "start"
+                });
+            });
+            </script>
+            """,
+            unsafe_allow_javascript=True,
+        )
+    with st.container(border=True):
+        if editing_entry:
+            st.markdown(
+                f'<h3>Du bearbeitest: <strong>{editing_entry["name"]}</strong> '
+                f'<span class="technical-label">&middot; UUID: {editing_entry["id"]}</span></h3>',
+                unsafe_allow_html=True,
             )
-            selected_object = next(o for o in user_objects if o["id"] == selected_row["id"])
-
-            if view_mode == "384D (Rohvektor)":
-                vector = np.array(selected_object["vector"])
-                st.caption(f"{len(vector)} Dimensionen - der vollständige Embedding-Vektor, wie er in Qdrant gespeichert ist.")
-                df_vector = pd.DataFrame({"Dimension": range(len(vector)), "Wert": vector})
-                st.dataframe(df_vector, width="stretch", hide_index=True, height=250)
+        else:
+            section("Neuen Eintrag anlegen", "Name und Beschreibung werden gemeinsam eingebettet, damit Qdrant nach Bedeutung suchen kann.")
+        with st.form(f"entry_form_{st.session_state.form_nonce}", clear_on_submit=False):
+            name = st.text_input("Name", value=editing_entry.get("name", "") if editing_entry else "", max_chars=db.config.max_name_length, placeholder="z. B. Mars", help="Ein kurzer, gut erkennbarer Name des Eintrags.")
+            description = st.text_area("Beschreibung", value=editing_entry.get("description", "") if editing_entry else "", max_chars=db.config.max_description_length, placeholder="z. B. Ein roter Planet mit einer dünnen Atmosphäre ...", help="Die Beschreibung wird für die semantische Suche in ein 384-dimensionales Embedding umgewandelt.")
+            if editing_entry:
+                cancel_col, save_col = st.columns([3, 7])
+                cancel_clicked = cancel_col.form_submit_button("Bearbeitung abbrechen", icon=":material/close:", width="stretch")
+                submitted = save_col.form_submit_button("Änderung speichern", type="primary", icon=":material/save:", width="stretch")
             else:
-                if selected_row["id"] in coords_2d_by_id:
-                    x, y = coords_2d_by_id[selected_row["id"]]
-                    st.caption("Die gleiche PCA-Projektion, die auch im Streudiagramm in Abschnitt 4 verwendet wird.")
-                    col_x, col_y = st.columns(2)
-                    col_x.metric("x", f"{x:.4f}")
-                    col_y.metric("y", f"{y:.4f}")
+                cancel_clicked = False
+                submitted = st.form_submit_button("Eintrag speichern", type="primary", icon=":material/save:", width="stretch")
+        if cancel_clicked:
+            st.session_state.editing_point_id = None
+            st.session_state.form_nonce += 1
+            st.rerun()
+        if not submitted:
+            return
+        if not name.strip() or not description.strip():
+            st.warning("Bitte Name und Beschreibung ausfüllen.")
+            return
+        try:
+            with st.spinner("Embedding wird erzeugt und gespeichert ..."):
+                if editing_entry:
+                    db.update_data(editing_id, name, description, active_user)
+                    record_activity("Aktualisieren", f"Eintrag '{name}' wurde aktualisiert.", active_user)
+                    message = f"'{name}' wurde aktualisiert."
                 else:
-                    st.info("Für die 2D-Projektion werden mindestens 2 Objekte für diesen Nutzer benötigt.")
-    else:
-        st.session_state.editing_point_id = None
+                    point_id = db.insert_data(name, description, active_user)
+                    record_activity(
+                        "Einfügen",
+                        f"Eintrag '{name}' wurde hinzugefügt (UUID: {point_id}).",
+                        active_user,
+                    )
+                    message = f"'{name}' wurde eingefügt."
+            mark_data_changed()
+            st.toast(message)
+            st.rerun()
+        except (ValidationError, EntryNotFoundError) as exc:
+            st.warning(str(exc))
+        except Exception:
+            logger.exception("Eintrag konnte nicht gespeichert werden.")
+            st.error("Der Eintrag konnte nicht gespeichert werden. Prüfe die Qdrant-Verbindung.")
 
-    st.dataframe(df_objects[["name", "description"]], width="stretch", hide_index=True)
-else:
-    st.info(f"Für {active_user} sind noch keine Weltraumobjekte gespeichert. Oben eines anlegen oder den Demodaten-Button in der Seitenleiste nutzen.")
 
-# ---------------------------------------------------------------------------
-# Section: Semantic search
-# ---------------------------------------------------------------------------
-st.header("3. Semantische Suche", divider="gray")
-
-query = st.text_input(
-    "Nach Bedeutung suchen",
-    placeholder="z. B. 'ein roter Planet mit Stürmen'",
-    label_visibility="collapsed",
-)
-
-if query:
-    results = db.search_data(
-        query_text=query,
-        user_id=active_user,
-        limit=max(len(user_objects), 1),
-    )
-    if results:
-        df_results = pd.DataFrame(results)[["name", "description", "score"]]
-        df_results["score"] = df_results["score"].round(4)
-        st.dataframe(df_results, width="stretch", hide_index=True)
-
-        st.subheader("Vektoren von Suchanfrage und Treffern", divider="gray")
-        st.caption(
-            "Die Suchanfrage wird als eigener Vektor dargestellt. Je näher ein Treffer "
-            "an ihr liegt, desto höher ist normalerweise sein Qdrant-Ähnlichkeitswert."
+@st.fragment
+def _render_entries(objects: list[dict]) -> None:
+    section("Deine Einträge", "Aktionen bleiben direkt am jeweiligen Eintrag und verwenden dessen UUID.")
+    count_col, filter_col = st.columns([1, 3])
+    count_col.metric("Einträge", len(objects))
+    filter_value = filter_col.text_input("Einträge filtern", key="entry_filter", placeholder="Nach Name oder Beschreibung filtern", label_visibility="collapsed")
+    search = filter_value.casefold().strip()
+    filtered = [entry for entry in objects if not search or search in entry.get("name", "").casefold() or search in entry.get("description", "").casefold()]
+    if not filtered:
+        empty_state("Keine passenden Einträge gefunden.", "Leere den Filter oder lege einen neuen Eintrag an.")
+        return
+    for entry in filtered:
+        edit_clicked, delete_clicked = entry_row(entry, editing=entry["id"] == st.session_state.editing_point_id)
+        if edit_clicked:
+            st.session_state.editing_point_id = entry["id"]
+            st.session_state.scroll_to_entry_form = True
+            st.session_state.form_nonce += 1
+            st.rerun()
+        if delete_clicked:
+            st.session_state.pending_delete_id = entry["id"]
+            st.rerun()
+@st.fragment
+def _render_search(objects: list[dict]) -> None:
+    section("Semantische Suche", "Formuliere eine Bedeutung statt eines exakten Schlüsselworts.")
+    with st.expander("Beispielfragen anzeigen"):
+        suggestion = st.selectbox(
+            "Demo-Frage auswählen",
+            DEMO_SUCHANFRAGEN,
+            index=None,
+            key="search_suggestion",
+            placeholder="Eine Beispielanfrage auswählen ...",
         )
-        vector_view = st.segmented_control(
-            "Vektoransicht",
-            ["384D (Wertevergleich)", "2D (gemeinsame PCA-Projektion)"],
-            default="2D (gemeinsame PCA-Projektion)",
-            key="search_vector_view",
+        if st.button("Frage übernehmen", icon=":material/input:", disabled=suggestion is None):
+            st.session_state.search_query_input = suggestion
+            st.rerun()
+    with st.form(f"search_form_{st.session_state.search_nonce}"):
+        query = st.text_input("Suchanfrage", key="search_query_input", placeholder="z. B. Person, die Mathematik unterrichtet", label_visibility="collapsed")
+        search_col, reset_col = st.columns([3, 1])
+        submitted = search_col.form_submit_button("Suchen", type="primary", icon=":material/search:", width="stretch")
+        reset = reset_col.form_submit_button(
+            "Zurücksetzen",
+            icon=":material/refresh:",
+            width="stretch",
+            on_click=_reset_search,
         )
-
-        query_vector = np.array(db.embed_text(query))
-        result_vectors = [np.array(result["vector"]) for result in results]
-
-        if vector_view == "384D (Wertevergleich)":
-            vector_labels = ["Suchanfrage"] + [
-                f"{result['name']} (Treffer {index})"
-                for index, result in enumerate(results, start=1)
-            ]
-            vector_matrix = np.vstack([query_vector, *result_vectors])
-            dimensions = np.arange(1, vector_matrix.shape[1] + 1)
-            df_vector_values = pd.DataFrame(vector_matrix.T, columns=vector_labels)
-            df_vector_values.insert(0, "Dimension", dimensions)
-
-            st.caption(
-                f"Alle {vector_matrix.shape[1]} Dimensionen. Gleiche Kurvenverläufe "
-                "bedeuten ähnliche Embedding-Muster."
-            )
-            df_vector_long = df_vector_values.melt(
-                id_vars="Dimension", var_name="Vektor", value_name="Wert"
-            )
-            fig_vectors = px.line(
-                df_vector_long,
-                x="Dimension",
-                y="Wert",
-                color="Vektor",
-                title="Werteverlauf über alle Embedding-Dimensionen",
-            )
-            st.plotly_chart(fig_vectors, width="stretch")
-            st.dataframe(df_vector_values.round(6), width="stretch", hide_index=True, height=260)
+    if reset:
+        st.rerun()
+    if submitted:
+        if not query.strip():
+            st.warning("Bitte eine Suchanfrage eingeben.")
         else:
-            # PCA projects the query and all returned vectors using one shared basis.
-            vector_matrix = np.vstack([query_vector, *result_vectors])
-            coords_search = PCA(n_components=2).fit_transform(vector_matrix)
-            df_search_plot = pd.DataFrame(
-                {
-                    "x": coords_search[:, 0],
-                    "y": coords_search[:, 1],
-                    "Bezeichnung": ["Suchanfrage"] + [result["name"] for result in results],
-                    "Kategorie": ["Suchanfrage"] + [
-                        "Bester Treffer"
-                        if index == 1
-                        else "Top 5"
-                        if index <= 5
-                        else "Unter Top 5"
-                        for index in range(1, len(results) + 1)
-                    ],
-                    "Typ": ["Suchanfrage"] + ["Treffer"] * len(results),
-                    "Ähnlichkeit": [None] + [round(result["score"], 4) for result in results],
-                    "Beschreibung": [query] + [result["description"] for result in results],
-                }
-            )
-            fig_search = px.scatter(
-                df_search_plot,
-                x="x",
-                y="y",
-                color="Kategorie",
-                symbol="Typ",
-                text="Bezeichnung",
-                hover_data={
-                    "Beschreibung": True,
-                    "Ähnlichkeit": True,
-                    "x": False,
-                    "y": False,
-                },
-                color_discrete_map={
-                    "Suchanfrage": "#2563eb",
-                    "Bester Treffer": "#16a34a",
-                    "Top 5": "#eab308",
-                    "Unter Top 5": "#dc2626",
-                },
-                title="Suchanfrage und Treffer im gemeinsamen 2D-Vektorraum",
-            )
-            fig_search.update_traces(textposition="top center", marker=dict(size=13))
-            st.plotly_chart(fig_search, width="stretch")
-            st.dataframe(
-                df_search_plot[["Bezeichnung", "Kategorie", "x", "y", "Ähnlichkeit"]].round(4),
-                width="stretch",
-                hide_index=True,
-            )
+            st.session_state.last_search_query = query.strip()
+            record_activity("Suche", f"Semantische Suche nach '{query.strip()}' gestartet.", active_user)
+            st.rerun()
+    query = st.session_state.get("last_search_query", "")
+    if not query:
+        st.info("Gib eine Anfrage ein, um semantisch ähnliche Einträge zu finden.", icon=":material/search:")
+        return
+    with st.spinner("Ähnliche Einträge werden gesucht ..."):
+        results = run_user_search(db, query_text=query, user_id=active_user, limit=min(max(len(objects), 1), db.config.max_search_limit), data_version=st.session_state.data_version, include_vectors=False)
+    if not results:
+        empty_state("Keine Treffer für diese Anfrage.", "Versuche eine allgemeinere Beschreibung.")
+        return
+    for index, result in enumerate(results, start=1):
+        with st.container(border=True):
+            top_col, score_col = st.columns([4, 1])
+            top_col.markdown(f"**{index}. {result['name']}**")
+            top_col.caption(result["description"])
+            score_col.metric("Ähnlichkeit", f"{result['score']:.0%}")
+
+
+@st.fragment
+def _render_vector_space(objects: list[dict]) -> None:
+    section("Vektorraum", "Die PCA projiziert 384 Dimensionen für die Darstellung auf zwei Achsen.")
+    if len(objects) < 3:
+        st.info("Für die Darstellung werden mindestens 3 Einträge benötigt.", icon=":material/scatter_plot:")
+        return
+    if not st.checkbox("PCA-Visualisierung laden", key="show_pca"):
+        st.info("Die Berechnung startet erst nach deiner Anforderung.")
+        return
+    with st.spinner("PCA-Projektion wird berechnet ..."):
+        vector_objects = load_user_objects(db, active_user, st.session_state.data_version, include_vectors=True)
+        vectors = np.array([entry["vector"] for entry in vector_objects])
+        coordinates = PCA(n_components=2).fit_transform(vectors)
+    plot_data = pd.DataFrame({"x": coordinates[:, 0], "y": coordinates[:, 1], "Name": [entry["name"] for entry in vector_objects], "Beschreibung": [entry["description"] for entry in vector_objects]})
+    fig = px.scatter(plot_data, x="x", y="y", text="Name", hover_data={"Beschreibung": True, "x": False, "y": False})
+    fig.update_traces(textposition="top center", marker={"size": 12, "color": "#0f766e"})
+    fig.update_layout(title=f"2D-Projektion der Einträge für {active_user}", xaxis_title="PCA-Achse 1", yaxis_title="PCA-Achse 2")
+    st.plotly_chart(apply_chart_style(fig), width="stretch")
+    st.caption("Nahe Punkte sind im ursprünglichen 384-dimensionalen Raum semantisch ähnlicher. Die Grafik ist eine Projektion und kein vollständiger Vektorvergleich.")
+    selected_id = st.selectbox("Technische Vektordetails anzeigen", [entry["id"] for entry in vector_objects], format_func=lambda point_id: next(entry["name"] for entry in vector_objects if entry["id"] == point_id))
+    selected = next(entry for entry in vector_objects if entry["id"] == selected_id)
+    vector = np.array(selected["vector"])
+    st.caption(f"{len(vector)} Dimensionen · erste zehn Werte")
+    st.dataframe(pd.DataFrame({"Dimension": range(1, 11), "Wert": vector[:10]}), hide_index=True, width="stretch")
+
+
+@st.fragment
+def _render_data_management() -> None:
+    section("Datenverwaltung", "Demo-Daten und technische Wartungsaktionen für den aktiven Nutzer.")
+    with st.container(border=True):
+        if st.button("Demodaten hinzufügen", icon=":material/auto_awesome:", width="stretch"):
+            try:
+                with st.spinner("Demodaten werden erzeugt ..."):
+                    count = db.seed_demo_data(active_user)
+                record_activity("Demodaten", f"{count} Beispielwerte wurden hinzugefügt.", active_user)
+                mark_data_changed()
+                st.toast(f"{count} Demodaten für {active_user} eingefügt.")
+                st.rerun()
+            except Exception:
+                logger.exception("Demodaten konnten nicht angelegt werden.")
+                st.error("Die Demodaten konnten nicht angelegt werden.")
+        if st.button("Suchvektoren neu erzeugen", icon=":material/sync:", width="stretch"):
+            try:
+                with st.spinner("Suchvektoren werden neu erzeugt ..."):
+                    count = db.reindex_user_data(active_user)
+                record_activity("Re-Embedding", f"{count} Suchvektoren wurden neu erzeugt.", active_user)
+                mark_data_changed()
+                st.toast(f"{count} Suchvektoren aktualisiert.")
+                st.rerun()
+            except Exception:
+                logger.exception("Re-Embedding konnte nicht ausgeführt werden.")
+                st.error("Die Suchvektoren konnten nicht neu erzeugt werden.")
+    with st.container(border=True):
+        st.subheader("Gefahrenbereich")
+        st.warning("Löschaktionen können nicht rückgängig gemacht werden.")
+        if st.button("Daten des aktuellen Nutzers löschen", icon=":material/person_remove:", width="stretch"):
+            st.session_state.confirm_delete_user = True
+        if st.session_state.confirm_delete_user:
+            st.write(f"Alle {db.count_for_user(active_user)} Einträge von {active_user} löschen?")
+            confirm_col, cancel_col = st.columns(2)
+            if confirm_col.button("Nutzerdaten endgültig löschen", type="primary", key="confirm_user_delete", width="stretch"):
+                count = db.count_for_user(active_user)
+                db.delete_user_data(active_user)
+                record_activity("Nutzerlöschung", f"{count} Einträge wurden für diesen Nutzer gelöscht.", active_user)
+                st.session_state.confirm_delete_user = False
+                mark_data_changed()
+                st.toast("Die Nutzerdaten wurden gelöscht.")
+                st.rerun()
+            if cancel_col.button("Abbrechen", key="cancel_user_delete", width="stretch"):
+                st.session_state.confirm_delete_user = False
+                st.rerun()
+        if st.button("ALLE Daten löschen", icon=":material/delete_forever:", width="stretch"):
+            st.session_state.confirm_delete_all = True
+        if st.session_state.confirm_delete_all:
+            st.error("Diese Aktion löscht die Daten aller Nutzer.")
+            confirmation = st.text_input("Zur Bestätigung LÖSCHEN eingeben", key="global_delete_confirmation")
+            confirm_col, cancel_col = st.columns(2)
+            if confirm_col.button("Alle Daten endgültig löschen", type="primary", key="confirm_all_delete", width="stretch"):
+                if confirmation == "LÖSCHEN":
+                    count = db.count_all()
+                    db.delete_all_data()
+                    record_activity("Gesamtlöschung", f"{count} Einträge aller Nutzer wurden gelöscht.", active_user)
+                    st.session_state.confirm_delete_all = False
+                    mark_data_changed()
+                    st.toast("Alle Daten wurden gelöscht.")
+                    st.rerun()
+                else:
+                    st.warning("Die Bestätigung stimmt nicht überein.")
+            if cancel_col.button("Abbrechen", key="cancel_all_delete", width="stretch"):
+                st.session_state.confirm_delete_all = False
+                st.rerun()
+
+
+page_header("Vektordatenbank-Demo", "Einträge verwalten, Bedeutungen suchen und Embeddings sichtbar machen.")
+user_objects = load_user_objects(db, active_user, st.session_state.data_version, include_vectors=False)
+objects_by_id = {entry["id"]: entry for entry in user_objects}
+if st.session_state.pending_delete_id:
+    pending_entry = objects_by_id.get(st.session_state.pending_delete_id)
+    if pending_entry:
+        _delete_dialog(pending_entry)
     else:
-        st.info("Keine Ergebnisse für diesen Nutzer gefunden.")
+        st.session_state.pending_delete_id = None
 
-# ---------------------------------------------------------------------------
-# Section: 2D vector visualization via PCA
-# ---------------------------------------------------------------------------
-st.header("4. Vektorraum-Visualisierung (PCA)", divider="gray")
-
-if len(user_objects) >= 2:
-    names = [o["name"] for o in user_objects]
-    descriptions = [o["description"] for o in user_objects]
-    coords_2d = np.array([coords_2d_by_id[o["id"]] for o in user_objects])
-
-    df_plot = pd.DataFrame(
-        {
-            "x": coords_2d[:, 0],
-            "y": coords_2d[:, 1],
-            "name": names,
-            "description": descriptions,
-        }
-    )
-
-    fig = px.scatter(
-        df_plot,
-        x="x",
-        y="y",
-        text="name",
-        hover_data={"description": True, "x": False, "y": False},
-        title=f"2D-Projektion der Embeddings für {active_user}",
-    )
-    fig.update_traces(textposition="top center", marker=dict(size=12))
-    st.plotly_chart(fig, width="stretch")
-    st.caption(
-        "Punkte, die nahe beieinander liegen, stehen für Weltraumobjekte mit "
-        "semantisch ähnlichen Beschreibungen - das ist der Kern dessen, wie eine "
-        "Vektordatenbank Informationen organisiert."
-    )
-else:
-    st.info("Mindestens 2 Weltraumobjekte für diesen Nutzer anlegen, um den PCA-Plot zu sehen.")
-
-
+entries_tab, search_tab, vector_tab, management_tab = st.tabs(["Einträge", "Suche", "Vektorraum", "Datenverwaltung"])
+with entries_tab:
+    _render_entry_form(objects_by_id)
+    st.divider()
+    if user_objects:
+        _render_entries(user_objects)
+    else:
+        empty_state("Noch keine Einträge.", "Lege oben deinen ersten Eintrag an oder erzeuge Demo-Daten in der Datenverwaltung.")
+with search_tab:
+    _render_search(user_objects)
+with vector_tab:
+    _render_vector_space(user_objects)
+with management_tab:
+    _render_data_management()
