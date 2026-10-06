@@ -16,7 +16,7 @@ import streamlit as st
 from app_state import init_state, record_activity, reset_user_state
 from database import VectorDBManager
 from errors import CollectionConfigurationError, DatabaseUnavailableError, EmbeddingModelError
-from ui.components import activity_log
+from ui.components import activity_log, technical_console
 
 logger = logging.getLogger(__name__)
 
@@ -79,6 +79,7 @@ st.sidebar.caption(
 )
 with st.sidebar:
     activity_log()
+    technical_console()
 
 # ---------------------------------------------------------------------------
 # Navigation

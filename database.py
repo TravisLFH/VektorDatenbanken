@@ -15,13 +15,12 @@ from __future__ import annotations
 
 import logging
 import uuid
-from typing import TYPE_CHECKING, List, Optional
+from typing import TYPE_CHECKING, Any, List, Mapping, Optional
 
 from qdrant_client import QdrantClient
 from qdrant_client.http import models
 
 from config import CONFIG, AppConfig
-from demo_data import iter_demo_entries
 from errors import (
     CollectionConfigurationError,
     DatabaseUnavailableError,
@@ -118,6 +117,11 @@ class VectorDBManager:
                 field_name="user_id",
                 field_schema=models.PayloadSchemaType.KEYWORD,
             )
+            self.client.create_payload_index(
+                collection_name=self.collection_name,
+                field_name="category",
+                field_schema=models.PayloadSchemaType.KEYWORD,
+            )
         except CollectionConfigurationError:
             raise
         except Exception as exc:
@@ -170,9 +174,9 @@ class VectorDBManager:
             raise EmbeddingModelError("Die Texte konnten nicht eingebettet werden.") from exc
 
     @staticmethod
-    def _embedding_text(name: str, description: str) -> str:
-        """Combines the searchable object name with its description."""
-        return f"{name}. {description}"
+    def _embedding_text(title: str, description: str) -> str:
+        """Builds the explicit text representation used for embeddings."""
+        return f"Title: {title} | Description: {description}"
 
     def embed_text(self, text: str) -> List[float]:
         """Creates the embedding used for a query or a stored description."""
@@ -217,13 +221,38 @@ class VectorDBManager:
             )
         return point_id
 
-    def insert_data(self, name: str, description: str, user_id: str) -> str:
+    def _build_payload(
+        self,
+        title: str,
+        description: str,
+        user_id: str,
+        metadata: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Combines user metadata with the fields required by the application."""
+        payload = dict(metadata or {})
+        payload.update(
+            {
+                "title": title,
+                "name": title,
+                "description": description,
+                "user_id": user_id,
+            }
+        )
+        return payload
+
+    def insert_data(
+        self,
+        name: str,
+        description: str,
+        user_id: str,
+        metadata: Mapping[str, Any] | None = None,
+    ) -> str:
         """Embeds a description and stores it as a new point in Qdrant.
 
         Returns:
             The generated UUID of the newly created point.
         """
-        name = validate_text(name, "Name", self.config.max_name_length)
+        name = validate_text(name, "Titel", self.config.max_name_length)
         description = validate_text(
             description, "Beschreibung", self.config.max_description_length
         )
@@ -237,24 +266,27 @@ class VectorDBManager:
                 models.PointStruct(
                     id=point_id,
                     vector=vector,
-                    payload={
-                        "name": name,
-                        "description": description,
-                        "user_id": user_id,
-                    },
+                    payload=self._build_payload(name, description, user_id, metadata),
                 )
             ],
         )
         return point_id
 
-    def update_data(self, point_id: str, name: str, description: str, user_id: str) -> None:
+    def update_data(
+        self,
+        point_id: str,
+        name: str,
+        description: str,
+        user_id: str,
+        metadata: Mapping[str, Any] | None = None,
+    ) -> None:
         """Overwrites an existing point's vector and payload.
 
         Since the description text changes, the embedding is recomputed
         so that search results stay semantically accurate.
         """
         point_id = validate_point_id(point_id)
-        name = validate_text(name, "Name", self.config.max_name_length)
+        name = validate_text(name, "Titel", self.config.max_name_length)
         description = validate_text(
             description, "Beschreibung", self.config.max_description_length
         )
@@ -268,17 +300,18 @@ class VectorDBManager:
                 models.PointStruct(
                     id=point_id,
                     vector=vector,
-                    payload={
-                        "name": name,
-                        "description": description,
-                        "user_id": user_id,
-                    },
+                    payload=self._build_payload(name, description, user_id, metadata),
                 )
             ],
         )
 
     def search_data(
-        self, query_text: str, user_id: str, limit: int = 5, include_vectors: bool = False
+        self,
+        query_text: str,
+        user_id: str,
+        limit: int = 5,
+        include_vectors: bool = False,
+        category: str | tuple[str, ...] | list[str] | None = None,
     ) -> List[dict]:
         """Performs a semantic vector search restricted to a single user.
 
@@ -289,14 +322,29 @@ class VectorDBManager:
         query_text = validate_text(query_text, "Suchtext", self.config.max_description_length)
         user_id = validate_user_id(user_id)
         limit = validate_search_limit(limit, self.config.max_search_limit)
+        categories = []
+        if isinstance(category, str):
+            categories = [validate_text(category, "Kategorie", 80)]
+        elif category is not None:
+            categories = [validate_text(value, "Kategorie", 80) for value in category]
         query_vector = self._embed(query_text)
 
-        user_filter = self.build_user_filter(user_id)
+        filter_conditions = list(self.build_user_filter(user_id).must)
+        search_filter = models.Filter(
+            must=filter_conditions,
+            should=[
+                models.FieldCondition(
+                    key="category",
+                    match=models.MatchValue(value=value),
+                )
+                for value in categories
+            ] or None,
+        )
 
         response = self.client.query_points(
             collection_name=self.collection_name,
             query=query_vector,
-            query_filter=user_filter,
+            query_filter=search_filter,
             limit=limit,
             with_payload=True,
             with_vectors=include_vectors,
@@ -338,15 +386,18 @@ class VectorDBManager:
     @staticmethod
     def _point_to_result(point: object, include_vectors: bool, score: float | None = None) -> dict:
         """Normalisiert Punkte mit fehlenden Payload-Feldern zu sicheren Defaults."""
-        payload = getattr(point, "payload", None) or {}
-        return {
+        payload = dict(getattr(point, "payload", None) or {})
+        result = {
+            **payload,
             "id": str(getattr(point, "id", "")),
             "score": score,
             "vector": getattr(point, "vector", None) if include_vectors else None,
-            "name": payload.get("name", "Ohne Namen"),
+            "title": payload.get("title", payload.get("name", "Ohne Titel")),
             "description": payload.get("description", "Keine Beschreibung"),
             "user_id": payload.get("user_id"),
         }
+        result["name"] = result["title"]
+        return result
 
     def delete_data(self, point_id: str, user_id: str) -> None:
         """Removes one point only when UUID and Nutzer gemeinsam match."""
@@ -391,7 +442,12 @@ class VectorDBManager:
             except Exception:
                 logger.warning("Fehlerhafter Punkt %s beim Reindex übersprungen.", obj.get("id"))
                 continue
-            valid_objects.append((obj, name, description))
+            metadata = {
+                key: value
+                for key, value in obj.items()
+                if key not in {"id", "score", "vector", "title", "name", "description", "user_id", "tags"}
+            }
+            valid_objects.append((obj, name, description, metadata))
             texts.append(self._embedding_text(name, description))
         if not valid_objects:
             return 0
@@ -400,13 +456,9 @@ class VectorDBManager:
             models.PointStruct(
                 id=validate_point_id(obj["id"]),
                 vector=vector,
-                payload={
-                    "name": name,
-                    "description": description,
-                    "user_id": user_id,
-                },
+                payload=self._build_payload(name, description, user_id, metadata),
             )
-            for (obj, name, description), vector in zip(valid_objects, vectors, strict=True)
+            for (obj, name, description, metadata), vector in zip(valid_objects, vectors, strict=True)
         ]
         self.client.upsert(collection_name=self.collection_name, points=points)
         return len(points)
@@ -436,31 +488,33 @@ class VectorDBManager:
         Returns:
             The number of objects inserted.
         """
-        sample_objects = iter_demo_entries()
+        from demo_data import iter_demo_entries_with_metadata
+
+        sample_objects = iter_demo_entries_with_metadata()
 
         user_id = validate_user_id(user_id)
         existing = {
-            (obj["name"], obj["description"])
+            (obj.get("name", obj.get("title")), obj["description"])
             for obj in self.get_all_for_user(user_id)
         }
         pending = [
-            (name, description)
-            for name, description in sample_objects
+            (name, description, metadata)
+            for name, description, metadata in sample_objects
             if (name, description) not in existing
         ]
         if not pending:
             return 0
 
         vectors = self._embed_many(
-            [self._embedding_text(name, description) for name, description in pending]
+            [self._embedding_text(name, description) for name, description, _metadata in pending]
         )
         points = [
             models.PointStruct(
                 id=str(uuid.uuid4()),
                 vector=vector,
-                payload={"name": name, "description": description, "user_id": user_id},
+                payload=self._build_payload(name, description, user_id, metadata),
             )
-            for (name, description), vector in zip(pending, vectors, strict=True)
+            for (name, description, metadata), vector in zip(pending, vectors, strict=True)
         ]
         self.client.upsert(collection_name=self.collection_name, points=points)
         return len(points)

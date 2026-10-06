@@ -18,6 +18,8 @@ def inject_css() -> None:
         /* Kennzeichnet den gerade bearbeiteten Eintrag ohne interne Streamlit-Klassen. */
         .editing-banner { border-left: 4px solid #0f766e; padding: 0.65rem 0.85rem; margin: 0.5rem 0 1rem; background: color-mix(in srgb, #0f766e 10%, transparent); }
         .technical-label { color: var(--text-color); font-family: var(--font); font-size: 0.72rem; opacity: 0.58; text-align: right; }
+        .metadata-chips { display: flex; flex-wrap: wrap; gap: 0.35rem; margin: 0.15rem 0 0.35rem; }
+        .metadata-chip { background: rgba(100, 116, 139, 0.13); border: 1px solid rgba(100, 116, 139, 0.2); border-radius: 999px; color: var(--text-color); font-size: 0.73rem; line-height: 1.35; padding: 0.12rem 0.5rem; opacity: 0.8; }
         </style>
         """,
         unsafe_allow_html=True,

@@ -51,3 +51,22 @@ def test_delete_requires_uuid_and_user(fake_client) -> None:
     manager.delete_data(point_id, "Nutzer A")
 
     assert point_id not in fake_client.points
+
+
+def test_metadata_is_stored_separately_from_embedding(fake_client) -> None:
+    manager = make_manager(fake_client)
+
+    point_id = manager.insert_data(
+        "Karotte",
+        "Knackiges orangefarbenes Gemüse.",
+        "Nutzer A",
+        metadata={"category": ["Gemüse", "Lebensmittel"]},
+    )
+
+    payload = fake_client.points[point_id].payload
+    assert payload["title"] == "Karotte"
+    assert payload["description"] == "Knackiges orangefarbenes Gemüse."
+    assert payload["category"] == ["Gemüse", "Lebensmittel"]
+    assert manager._embedding_text("Karotte", "Knackiges orangefarbenes Gemüse.") == (
+        "Title: Karotte | Description: Knackiges orangefarbenes Gemüse."
+    )

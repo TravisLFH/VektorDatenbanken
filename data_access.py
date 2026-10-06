@@ -23,6 +23,7 @@ def run_user_search(
     user_id: str,
     limit: int,
     data_version: int,
+    category: str | None = None,
     include_vectors: bool = False,
 ) -> list[dict]:
     """Cached eine Suche ausschließlich mit Nutzer- und Datenversionsschlüssel."""
@@ -31,5 +32,6 @@ def run_user_search(
         query_text=query_text,
         user_id=user_id,
         limit=limit,
+        category=category,
         include_vectors=include_vectors,
     )

@@ -22,3 +22,31 @@ def iter_demo_entries() -> list[tuple[str, str]]:
     ]
     entries.extend(_DATA["GRENZFAELLE"])
     return entries
+
+
+def iter_demo_entries_with_metadata() -> list[tuple[str, str, dict[str, object]]]:
+    """Liefert Demo-Einträge mit einer einfachen, filterbaren Kategorie."""
+    category_by_group = {
+        "Obst": "Obst",
+        "Gemüse": "Gemüse",
+        "Tiere": "Tier",
+        "Fahrzeuge": "Fahrzeug",
+    }
+    object_groups = {"Möbel", "Werkzeuge", "Elektronik", "Musikinstrumente"}
+    entries = []
+    for group, items in _DATA["DEMO_DATEN"].items():
+        if group.startswith("Berufe"):
+            category = "Job"
+        elif group in category_by_group:
+            category = category_by_group[group]
+        elif group in object_groups:
+            category = "Gegenstand"
+        else:
+            category = "Sonstiges"
+        for name, description in items:
+            entries.append((name, description, {"category": [category]}))
+    entries.extend(
+        (name, description, {"category": ["Sonstiges"]})
+        for name, description in _DATA["GRENZFAELLE"]
+    )
+    return entries

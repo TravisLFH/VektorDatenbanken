@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from html import escape
 from typing import Any
 
 import streamlit as st
@@ -30,6 +31,18 @@ def empty_state(message: str, hint: str | None = None) -> None:
         st.caption(hint)
 
 
+def metadata_chips(entry: dict[str, Any]) -> str:
+    """Rendert Kategorien als kompakte, graue Karten-Metadaten."""
+    values = []
+    category = entry.get("category")
+    if isinstance(category, list):
+        values.extend(str(value) for value in category)
+    elif category:
+        values.append(str(category))
+    chips = "".join(f'<span class="metadata-chip">{escape(value)}</span>' for value in values)
+    return f'<div class="metadata-chips">{chips}</div>' if chips else ""
+
+
 def activity_log() -> None:
     """Zeigt die letzten fachlich relevanten Aktionen der aktuellen Sitzung."""
     section("Aktivitätsprotokoll", "Nachvollziehbare Ausgaben für die praktische Vorführung.")
@@ -50,6 +63,29 @@ def activity_log() -> None:
             st.rerun()
 
 
+def technical_console() -> None:
+    """Zeigt die letzten technischen Datenbank-Interaktionen als Trace an."""
+    section("Technische Konsole", "Letzte Inputs und Outputs der Datenbankaktionen.")
+    entries = st.session_state.get("technical_log", [])
+    with st.container(border=True):
+        if not entries:
+            st.caption("Noch keine Datenbankaktion ausgeführt.")
+        else:
+            for index, entry in enumerate(reversed(entries)):
+                st.caption(
+                    f"{entry['timestamp']} · {entry['user']} · {entry['operation']}"
+                )
+                st.code(
+                    f"INPUT\n{entry['input']}\n\nOUTPUT\n{entry['output']}",
+                    language="text",
+                )
+                if index < len(entries) - 1:
+                    st.divider()
+        if st.button("Konsole leeren", icon=":material/clear_all:", width="content"):
+            st.session_state.technical_log = []
+            st.rerun()
+
+
 def entry_row(entry: dict[str, Any], editing: bool = False) -> tuple[bool, bool]:
     """Rendert eine Eintragszeile und gibt Bearbeiten-/Löschen-Klicks zurück."""
     with st.container(border=True):
@@ -63,6 +99,7 @@ def entry_row(entry: dict[str, Any], editing: bool = False) -> tuple[bool, bool]
                 unsafe_allow_html=True,
             )
             st.caption(entry.get("description", "Keine Beschreibung"))
+            st.markdown(metadata_chips(entry), unsafe_allow_html=True)
         with edit_col:
             edit_clicked = st.button(
                 "Bearbeiten",

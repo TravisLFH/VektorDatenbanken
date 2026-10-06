@@ -25,8 +25,12 @@ STATE_DEFAULTS = {
     "last_search_query": "",
     "search_query_input": "",
     "search_suggestion": "",
+    "search_category_filter": [],
     "show_pca": False,
+    "show_search_projection": False,
     "activity_log": [],
+    "technical_log": [],
+    "last_traced_search": None,
 }
 
 
@@ -48,7 +52,9 @@ def reset_user_state() -> None:
     st.session_state.last_search_query = ""
     st.session_state.search_query_input = ""
     st.session_state.search_suggestion = ""
+    st.session_state.search_category_filter = []
     st.session_state.show_pca = False
+    st.session_state.show_search_projection = False
     st.session_state.data_version += 1
 
 
@@ -70,3 +76,24 @@ def record_activity(action: str, message: str, user_id: str | None = None) -> No
     activity_log = st.session_state.setdefault("activity_log", [])
     activity_log.append(entry)
     del activity_log[:-25]
+
+
+def record_technical_event(
+    operation: str,
+    input_data: str,
+    output_data: str,
+    user_id: str | None = None,
+) -> None:
+    """Speichert einen kompakten Input-/Output-Trace für die Demo-Sidebar."""
+    user_label = user_id or st.session_state.get("active_user", "Unbekannter Nutzer")
+    technical_log = st.session_state.setdefault("technical_log", [])
+    technical_log.append(
+        {
+            "timestamp": datetime.now().strftime("%H:%M:%S"),
+            "user": user_label,
+            "operation": operation,
+            "input": input_data,
+            "output": output_data,
+        }
+    )
+    del technical_log[:-12]
