@@ -53,7 +53,7 @@ if ($RequirementsHash -ne $InstalledHash) {
 
 Write-Host "==> Starte Streamlit-App..." -ForegroundColor Cyan
 # Hugging Face darf nur den bereits vorhandenen lokalen Modell-Cache verwenden.
-$env:HF_HUB_OFFLINE = "1"
+$env:HF_HUB_OFFLINE = "0"
 $env:TRANSFORMERS_OFFLINE = "1"
 # Qdrant schreibt beim Einfuegen viele interne Dateien in qdrant_storage. Ein
 # Streamlit-Dateiwatcher wuerde diese Schreibvorgaenge als Codeaenderungen
