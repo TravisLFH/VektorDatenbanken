@@ -44,6 +44,25 @@ def test_user_filter_isolation_for_list_update_and_delete(fake_client) -> None:
     assert fake_client.points[point_b].payload["user_id"] == "Nutzer B"
 
 
+def test_get_all_for_user_returns_full_stored_payload_and_vector(fake_client) -> None:
+    manager = make_manager(fake_client)
+    point_id = manager.insert_data(
+        "Mars",
+        "Roter Planet",
+        "Nutzer A",
+        metadata={"category": ["Planet"]},
+    )
+    manager.insert_data("Jupiter", "Gasriese", "Nutzer B")
+
+    stored_points = manager.get_all_for_user("Nutzer A", include_vectors=True)
+
+    assert len(stored_points) == 1
+    stored_point = stored_points[0]
+    assert stored_point["id"] == point_id
+    assert stored_point["qdrant_payload"] == fake_client.points[point_id].payload
+    assert stored_point["vector"] == fake_client.points[point_id].vector
+
+
 def test_delete_requires_uuid_and_user(fake_client) -> None:
     manager = make_manager(fake_client)
     point_id = manager.insert_data("Mars", "Roter Planet", "Nutzer A")

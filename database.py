@@ -392,6 +392,7 @@ class VectorDBManager:
             "id": str(getattr(point, "id", "")),
             "score": score,
             "vector": getattr(point, "vector", None) if include_vectors else None,
+            "qdrant_payload": payload,
             "title": payload.get("title", payload.get("name", "Ohne Titel")),
             "description": payload.get("description", "Keine Beschreibung"),
             "user_id": payload.get("user_id"),

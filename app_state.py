@@ -28,6 +28,7 @@ STATE_DEFAULTS = {
     "search_category_filter": [],
     "show_pca": False,
     "show_search_projection": False,
+    "show_stored_vectors": False,
     "activity_log": [],
     "technical_log": [],
     "last_traced_search": None,
@@ -55,6 +56,7 @@ def reset_user_state() -> None:
     st.session_state.search_category_filter = []
     st.session_state.show_pca = False
     st.session_state.show_search_projection = False
+    st.session_state.show_stored_vectors = False
     st.session_state.data_version += 1
 
 

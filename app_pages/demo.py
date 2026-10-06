@@ -1,6 +1,7 @@
 """Interaktive Demo mit Einträgen, Suche, Vektorraum und Datenverwaltung."""
 from __future__ import annotations
 
+import json
 import logging
 
 import numpy as np
@@ -269,6 +270,66 @@ def _render_search(objects: list[dict]) -> None:
             top_col.caption(result["description"])
             top_col.markdown(metadata_chips(result), unsafe_allow_html=True)
             score_col.metric("Ähnlichkeit", f"{result['score']:.0%}")
+
+
+@st.fragment
+def _render_stored_vectors(objects: list[dict]) -> None:
+    section(
+        "Gespeicherte Vektordaten",
+        "Die Karten entsprechen der Eintragsübersicht. Lade bei Bedarf die vollständige "
+        "Qdrant-Punktstruktur mit Payload und allen Vektordimensionen.",
+    )
+    if not objects:
+        empty_state("Noch keine Einträge für diesen Nutzer vorhanden.")
+        return
+
+    show_vectors = st.checkbox(
+        "Vollständige Vektoren und gespeicherte Daten anzeigen",
+        key="show_stored_vectors",
+        help="Lädt die vollständigen Vektoren dieses Nutzers aus Qdrant.",
+    )
+    vectors_by_id = {}
+    if show_vectors:
+        with st.spinner("Gespeicherte Vektoren werden geladen ..."):
+            vector_objects = load_user_objects(
+                db, active_user, st.session_state.data_version, include_vectors=True
+            )
+        vectors_by_id = {entry["id"]: entry for entry in vector_objects}
+
+    for entry in objects:
+        with st.container(border=True):
+            st.markdown(f"**{entry.get('name', 'Ohne Namen')}**")
+            st.caption(f"UUID: {entry['id']}")
+            st.caption(entry.get("description", "Keine Beschreibung"))
+            st.markdown(metadata_chips(entry), unsafe_allow_html=True)
+
+            if show_vectors:
+                stored_entry = vectors_by_id.get(entry["id"])
+                if stored_entry is None:
+                    st.error("Der gespeicherte Punkt konnte in Qdrant nicht geladen werden.")
+                    continue
+                vector = stored_entry.get("vector")
+                if vector is None:
+                    st.error("Qdrant hat für diesen Punkt keinen Vektor zurückgegeben.")
+                    continue
+                if hasattr(vector, "tolist"):
+                    vector = vector.tolist()
+                with st.expander("Vollständige gespeicherte Punktdaten anzeigen"):
+                    st.caption(
+                        f"{len(vector)} Vektordimensionen · Original-Payload aus Qdrant"
+                    )
+                    st.code(
+                        json.dumps(
+                            {
+                                "id": stored_entry["id"],
+                                "payload": stored_entry["qdrant_payload"],
+                                "vector": vector,
+                            },
+                            ensure_ascii=False,
+                            indent=2,
+                        ),
+                        language="json",
+                    )
 
 
 @st.fragment
@@ -587,7 +648,9 @@ if st.session_state.pending_delete_id:
     else:
         st.session_state.pending_delete_id = None
 
-entries_tab, search_tab, vector_tab, management_tab = st.tabs(["Einträge", "Suche", "Vektorraum", "Datenverwaltung"])
+entries_tab, search_tab, vector_tab, stored_tab, management_tab = st.tabs(
+    ["Einträge", "Suche", "Vektorraum", "Vektordaten", "Datenverwaltung"]
+)
 with entries_tab:
     _render_entry_form(objects_by_id)
     st.divider()
@@ -599,5 +662,7 @@ with search_tab:
     _render_search(user_objects)
 with vector_tab:
     _render_vector_space(user_objects)
+with stored_tab:
+    _render_stored_vectors(user_objects)
 with management_tab:
     _render_data_management()
