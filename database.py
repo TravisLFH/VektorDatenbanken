@@ -74,13 +74,13 @@ class VectorDBManager:
 
                 self.encoder = SentenceTransformer(
                     self.config.embedding_model,
-                    local_files_only=True,
+                    local_files_only=False,
                 )
             except Exception as exc:
                 logger.exception("Embedding-Modell konnte nicht geladen werden.")
                 raise EmbeddingModelError(
-                    "Das Embedding-Modell ist nicht vollständig im lokalen Hugging-Face-Cache vorhanden. "
-                    "Offline-Modus aktiv: Es wurde kein Download gestartet."
+                    "Das Embedding-Modell konnte weder aus dem lokalen Hugging-Face-Cache "
+                    "geladen noch aus dem Internet heruntergeladen werden."
                 ) from exc
         return self.encoder
 

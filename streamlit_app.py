@@ -13,6 +13,39 @@ import logging
 
 import streamlit as st
 
+class _OptionalTorchvisionWatcherFilter(logging.Filter):
+    """Suppress repeated Streamlit probes for unused Transformers vision modules."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.reported = False
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        exception = record.exc_info[1] if record.exc_info else None
+        is_optional_vision_probe = (
+            record.name == "streamlit.watcher.local_sources_watcher"
+            and record.getMessage().startswith("Examining the path of transformers.models.")
+            and isinstance(exception, ModuleNotFoundError)
+            and exception.name == "torchvision"
+        )
+        if not is_optional_vision_probe:
+            return True
+
+        if not self.reported:
+            logging.getLogger(__name__).info(
+                "Streamlit prüft optionale Transformers-Bildmodule; torchvision wird "
+                "von dieser Textsuche nicht benötigt. Wiederholte Watcher-Meldungen "
+                "dazu werden ausgeblendet."
+            )
+            self.reported = True
+        return False
+
+
+_watcher_logger = logging.getLogger("streamlit.watcher.local_sources_watcher")
+if not getattr(_watcher_logger, "_optional_torchvision_filter_installed", False):
+    _watcher_logger.addFilter(_OptionalTorchvisionWatcherFilter())
+    setattr(_watcher_logger, "_optional_torchvision_filter_installed", True)
+
 from app_state import init_state, record_activity, reset_user_state
 from database import VectorDBManager
 from errors import CollectionConfigurationError, DatabaseUnavailableError, EmbeddingModelError
@@ -35,12 +68,12 @@ def get_db_manager() -> VectorDBManager:
 
 
 try:
-    with st.spinner("Embedding-Modell wird aus dem lokalen Cache geladen ..."):
+    with st.spinner("Embedding-Modell wird aus dem Cache geladen oder bei Bedarf heruntergeladen ..."):
         st.session_state.db = get_db_manager()
 except EmbeddingModelError as exc:
     logger.warning("Embedding-Modell konnte nicht initialisiert werden: %s", exc)
-    st.error("Das Embedding-Modell konnte nicht aus dem lokalen Cache geladen werden.")
-    st.info("Prüfe den lokalen Hugging-Face-Cache und starte die Anwendung danach erneut.")
+    st.error("Das Embedding-Modell konnte nicht geladen oder heruntergeladen werden.")
+    st.info("Prüfe die Internetverbindung und den Hugging-Face-Modell-Cache, und versuche es erneut.")
     if st.button("Erneut versuchen", icon=":material/refresh:"):
         get_db_manager.clear()
         st.rerun()

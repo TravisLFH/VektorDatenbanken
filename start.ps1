@@ -52,9 +52,9 @@ if ($RequirementsHash -ne $InstalledHash) {
 }
 
 Write-Host "==> Starte Streamlit-App..." -ForegroundColor Cyan
-# Hugging Face darf nur den bereits vorhandenen lokalen Modell-Cache verwenden.
+# Hugging Face verwendet den lokalen Cache und darf fehlende Modelldateien laden.
 $env:HF_HUB_OFFLINE = "0"
-$env:TRANSFORMERS_OFFLINE = "1"
+$env:TRANSFORMERS_OFFLINE = "0"
 # Der Streamlit-Dateiwatcher laedt Aenderungen am Python-Code automatisch neu.
 # .venv und qdrant_storage sind in .streamlit/config.toml davon ausgenommen.
 streamlit run "$ProjectRoot\streamlit_app.py"
