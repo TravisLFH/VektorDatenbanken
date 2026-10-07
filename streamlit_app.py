@@ -10,6 +10,8 @@ the selected page. All pages read `st.session_state.db` and
 """
 
 import logging
+from concurrent.futures import ThreadPoolExecutor
+from queue import Empty, Queue
 
 import streamlit as st
 
@@ -47,8 +49,10 @@ if not getattr(_watcher_logger, "_optional_torchvision_filter_installed", False)
     setattr(_watcher_logger, "_optional_torchvision_filter_installed", True)
 
 from app_state import init_state, record_activity, reset_user_state
+from config import CONFIG
 from database import VectorDBManager
 from errors import CollectionConfigurationError, DatabaseUnavailableError, EmbeddingModelError
+from model_download import download_embedding_model
 from ui.components import activity_log, hot_reload_timer, technical_console
 
 logger = logging.getLogger(__name__)
@@ -57,7 +61,7 @@ st.set_page_config(page_title="Vektordatenbank Demo", layout="wide", page_icon="
 init_state()
 
 
-@st.cache_resource
+@st.cache_resource(show_spinner=False)
 def get_db_manager() -> VectorDBManager:
     """Creates a single shared DB connection + embedding model for the app
     session (loading the embedding model is expensive, so we cache it)."""
@@ -67,13 +71,70 @@ def get_db_manager() -> VectorDBManager:
     return manager
 
 
+def _show_model_download(progress: Queue[tuple[str, float, float | None, str]]) -> bool:
+    """Waits for the model download and renders its latest per-file progress."""
+    downloaded = False
+    progress_bar = st.progress(0, text="Prüfe den Hugging-Face-Cache ...")
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        download = executor.submit(download_embedding_model, progress)
+        while not download.done() or not progress.empty():
+            try:
+                description, current, total, unit = progress.get(timeout=0.1)
+                downloaded = True
+                while True:
+                    try:
+                        description, current, total, unit = progress.get_nowait()
+                    except Empty:
+                        break
+                if total and total > 0:
+                    fraction = min(current / total, 1.0)
+                    percent = fraction * 100
+                    if unit == "B":
+                        current_text = f"{current / (1024 * 1024):.1f}"
+                        total_text = f"{total / (1024 * 1024):.1f}"
+                        progress_text = (
+                            f"{description}: {percent:.0f}% "
+                            f"({current_text}/{total_text} MiB)"
+                        )
+                    else:
+                        progress_unit = "Dateien" if unit in {"it", "file", "files"} else unit
+                        progress_text = (
+                            f"{description}: {percent:.0f}% "
+                            f"({current:.0f}/{total:.0f} {progress_unit})"
+                        )
+                    progress_bar.progress(fraction, text=progress_text)
+                else:
+                    progress_bar.progress(0, text=f"Lade Modelldatei: {description}")
+            except Empty:
+                continue
+        download.result()
+    progress_bar.empty()
+    return downloaded
+
+
 try:
-    with st.spinner("Embedding-Modell wird aus dem Cache geladen oder bei Bedarf heruntergeladen ..."):
+    with st.status("Embedding-Modell wird vorbereitet ...", expanded=True) as startup_status:
+        if "db" not in st.session_state:
+            st.write("Prüfe den Modell-Cache; fehlende Dateien werden heruntergeladen.")
+            download_progress: Queue[tuple[str, float, float | None, str]] = Queue()
+            model_was_downloaded = _show_model_download(download_progress)
+            if model_was_downloaded:
+                st.write("Download abgeschlossen. Lade das Modell in den Arbeitsspeicher ...")
+            else:
+                st.write("Modell ist bereits vollständig im Cache. Lade es in den Arbeitsspeicher ...")
+        else:
+            st.write("Modell und Datenbankverbindung werden aus dem laufenden Prozess wiederverwendet.")
+        st.write("Initialisiere Qdrant und das Embedding-Modell ...")
         st.session_state.db = get_db_manager()
+        startup_status.update(label="Datenbank und Embedding-Modell sind bereit.", state="complete")
 except EmbeddingModelError as exc:
     logger.warning("Embedding-Modell konnte nicht initialisiert werden: %s", exc)
+    startup_status.update(label="Embedding-Modell konnte nicht geladen werden.", state="error")
     st.error("Das Embedding-Modell konnte nicht geladen oder heruntergeladen werden.")
     st.info("Prüfe die Internetverbindung und den Hugging-Face-Modell-Cache, und versuche es erneut.")
+    if exc.__cause__:
+        with st.expander("Technische Details zum Fehler"):
+            st.exception(exc.__cause__)
     if st.button("Erneut versuchen", icon=":material/refresh:"):
         get_db_manager.clear()
         st.rerun()

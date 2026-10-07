@@ -26,7 +26,7 @@ docker compose up -d
 Die App ist anschließend unter `http://localhost:8501` erreichbar. Der Qdrant-Healthcheck liegt unter `http://127.0.0.1:6333/healthz`.
 Änderungen an Python-Dateien werden automatisch in die laufende App übernommen. Der Datei-Watcher ignoriert `.venv` und `qdrant_storage`; unten rechts zeigt ein Timer die Zeit seit dem letzten Hot Reload. Nach jeder Suche wird die Uhrzeit der letzten Suchanfrage einschließlich Millisekunden angezeigt.
 Streamlit untersucht außerdem optionale Bildverarbeitungsmodule von Transformers. Die dadurch entstehenden Watcher-Meldungen zu fehlendem `torchvision` werden einmalig zusammengefasst; die Textsuche benötigt diese Abhängigkeit nicht.
-Das Hugging-Face-Modell wird beim ersten Start aus dem Internet heruntergeladen, falls es noch nicht im lokalen Cache liegt. Danach wird die lokale Kopie wiederverwendet. Für den ersten Download ist eine Internetverbindung erforderlich.
+Das Hugging-Face-Modell wird beim ersten Start aus dem Internet heruntergeladen, falls es noch nicht im lokalen Cache liegt. Dabei lädt die Demo nur die für den PyTorch-Encoder benötigten Modell- und Tokenizer-Dateien, nicht optionale ONNX-/OpenVINO-Exporte. Danach wird die lokale Kopie wiederverwendet. Für den ersten Download ist eine Internetverbindung erforderlich.
 
 ## Konfiguration
 
