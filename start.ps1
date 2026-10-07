@@ -55,7 +55,6 @@ Write-Host "==> Starte Streamlit-App..." -ForegroundColor Cyan
 # Hugging Face darf nur den bereits vorhandenen lokalen Modell-Cache verwenden.
 $env:HF_HUB_OFFLINE = "0"
 $env:TRANSFORMERS_OFFLINE = "1"
-# Qdrant schreibt beim Einfuegen viele interne Dateien in qdrant_storage. Ein
-# Streamlit-Dateiwatcher wuerde diese Schreibvorgaenge als Codeaenderungen
-# behandeln und eine Fehlerflut bzw. unnoetige Reruns ausloesen.
+# Der Streamlit-Dateiwatcher laedt Aenderungen am Python-Code automatisch neu.
+# .venv und qdrant_storage sind in .streamlit/config.toml davon ausgenommen.
 streamlit run "$ProjectRoot\streamlit_app.py"

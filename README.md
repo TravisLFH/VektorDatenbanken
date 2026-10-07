@@ -24,6 +24,7 @@ docker compose up -d
 ```
 
 Die App ist anschließend unter `http://localhost:8501` erreichbar. Der Qdrant-Healthcheck liegt unter `http://127.0.0.1:6333/healthz`.
+Änderungen an Python-Dateien werden automatisch in die laufende App übernommen. Der Datei-Watcher ignoriert `.venv` und `qdrant_storage`; unten rechts zeigt ein Timer die Zeit seit dem letzten Hot Reload. Nach jeder Suche wird die Uhrzeit der letzten Suchanfrage einschließlich Millisekunden angezeigt.
 
 ## Konfiguration
 

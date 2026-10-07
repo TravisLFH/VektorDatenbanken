@@ -2,12 +2,45 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from html import escape
 from typing import Any
 
 import streamlit as st
 
 from ui.theme import inject_css
+
+
+@st.fragment(run_every="1s")
+def hot_reload_timer() -> None:
+    """Zeigt unten rechts die Zeit seit dem letzten Start oder Code-Reload."""
+    last_hot_reload_at = st.session_state.last_hot_reload_at
+    elapsed_seconds = max(0, int((datetime.now() - last_hot_reload_at).total_seconds()))
+    hours, remainder = divmod(elapsed_seconds, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    st.html(
+        f"""
+        <style>
+            .hot-reload-timer {{
+                position: fixed;
+                right: 1rem;
+                bottom: 1rem;
+                z-index: 999999;
+                padding: 0.35rem 0.65rem;
+                border: 1px solid rgba(15, 118, 110, 0.25);
+                border-radius: 999px;
+                background: rgba(248, 250, 252, 0.96);
+                box-shadow: 0 2px 10px rgba(15, 23, 42, 0.12);
+                color: #24313a;
+                font: 12px/1.3 sans-serif;
+                pointer-events: none;
+            }}
+        </style>
+        <div class="hot-reload-timer">
+            Hot Reload: {hours:02d}:{minutes:02d}:{seconds:02d}
+        </div>
+        """
+    )
 
 
 def page_header(title: str, subtitle: str) -> None:

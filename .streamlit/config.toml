@@ -1,8 +1,7 @@
 [server]
-# Qdrant schreibt beim Einfuegen interne Dateien in qdrant_storage.
-# Der Watcher soll diese Datenbank-Schreibvorgaenge nicht als Codeaenderungen
-# behandeln. Fuer Codeaenderungen die App neu starten.
-fileWatcherType = "none"
+# App-Code wird automatisch neu geladen; grosse Laufzeitdaten bleiben ungeachtet.
+fileWatcherType = "auto"
+folderWatchBlacklist = [".venv", "qdrant_storage", ".git", ".pytest_cache", "__pycache__"]
 
 [theme]
 primaryColor = "#0f766e"

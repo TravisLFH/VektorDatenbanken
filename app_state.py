@@ -4,6 +4,10 @@ from __future__ import annotations
 
 from datetime import datetime
 
+import os
+from datetime import datetime
+from pathlib import Path
+
 import streamlit as st
 
 
@@ -32,6 +36,9 @@ STATE_DEFAULTS = {
     "activity_log": [],
     "technical_log": [],
     "last_traced_search": None,
+    "python_source_signature": None,
+    "last_hot_reload_at": None,
+    "last_search_at": None,
 }
 
 
@@ -39,6 +46,36 @@ def init_state() -> None:
     """Initialisiert alle globalen App-Zustände genau einmal."""
     for key, value in STATE_DEFAULTS.items():
         st.session_state.setdefault(key, value)
+    update_hot_reload_state()
+
+
+def update_hot_reload_state() -> None:
+    """Erkennt Quellcodeänderungen ohne normale Widget-Reruns als Reload zu zählen."""
+    project_root = Path(__file__).resolve().parent
+    excluded_directories = {".git", ".pytest_cache", ".venv", "__pycache__", "qdrant_storage"}
+    signature = []
+    for directory, subdirectories, filenames in os.walk(project_root):
+        subdirectories[:] = [
+            name for name in subdirectories if name not in excluded_directories
+        ]
+        for filename in filenames:
+            if filename.endswith(".py"):
+                source_path = Path(directory, filename)
+                metadata = source_path.stat()
+                signature.append(
+                    (
+                        str(source_path.relative_to(project_root)),
+                        metadata.st_mtime_ns,
+                        metadata.st_size,
+                    )
+                )
+
+    current_signature = tuple(sorted(signature))
+    previous_signature = st.session_state.python_source_signature
+    if previous_signature != current_signature:
+        if previous_signature is not None or st.session_state.last_hot_reload_at is None:
+            st.session_state.last_hot_reload_at = datetime.now()
+        st.session_state.python_source_signature = current_signature
 
 
 def reset_user_state() -> None:

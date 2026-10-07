@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import logging
+from datetime import datetime
 
 import numpy as np
 import pandas as pd
@@ -239,8 +240,12 @@ def _render_search(objects: list[dict]) -> None:
             st.warning("Bitte eine Suchanfrage eingeben.")
         else:
             st.session_state.last_search_query = query.strip()
+            st.session_state.last_search_at = datetime.now()
             record_activity("Suche", f"Semantische Suche nach '{query.strip()}' gestartet.", active_user)
             st.rerun()
+    last_search_at = st.session_state.get("last_search_at")
+    if last_search_at is not None:
+        st.caption(f"Letzte Suche: {last_search_at.strftime('%H:%M:%S.%f')[:-3]}")
     query = st.session_state.get("last_search_query", "")
     if not query:
         st.info("Gib eine Anfrage ein, um semantisch ähnliche Einträge zu finden.", icon=":material/search:")
