@@ -339,7 +339,7 @@ def _render_stored_vectors(objects: list[dict]) -> None:
 
 @st.fragment
 def _render_vector_space(objects: list[dict]) -> None:
-    section("Vektorraum", "PCA projiziert die Embeddings für eine interaktive 2D- oder 3D-Ansicht.")
+    section("Vektorraum", "PCA projiziert alle Embeddings für eine interaktive 2D- oder 3D-Ansicht.")
     if len(objects) < 3:
         st.info("Für die Darstellung werden mindestens 3 Einträge benötigt.", icon=":material/scatter_plot:")
         return
@@ -511,13 +511,66 @@ def _render_vector_space(objects: list[dict]) -> None:
             )
     axis_titles = {axis: f"PCA-Achse {index}" for index, axis in enumerate(("x", "y", "z")[:dimensions], start=1)}
     fig.update_layout(
-        title=f"{view}-Projektion der Einträge für {active_user}",
+        title=f"{view}-Projektion von drei Einträgen für {active_user}",
         **({"xaxis_title": axis_titles["x"], "yaxis_title": axis_titles["y"]} if dimensions == 2 else {"scene": {"xaxis_title": axis_titles["x"], "yaxis_title": axis_titles["y"], "zaxis_title": axis_titles["z"]}}),
     )
     st.plotly_chart(apply_chart_style(fig), width="stretch")
     explained = pca.explained_variance_ratio_.sum()
     search_caption = " Rot = Suchanfrage, gelb = fünf beste Treffer, grau = übrige Einträge." if query_coordinate is not None else ""
     st.caption(f"Die {view}-Ansicht erklärt {explained:.1%} der Varianz. Nahe Punkte sind im ursprünglichen {db.config.embedding_dimension}D-Raum tendenziell semantisch ähnlicher; die Grafik bleibt eine Projektion.{search_caption}")
+
+    st.subheader("Vektorwerte aller Einträge")
+    st.caption(
+        "Jede Linie zeigt die Werte eines gespeicherten Embeddings über alle "
+        f"{db.config.embedding_dimension} Dimensionen."
+    )
+    vector_fig = go.Figure()
+    vector_dimensions = np.arange(1, vectors.shape[1] + 1)
+    line_colors = px.colors.sample_colorscale(
+        "Turbo",
+        [
+            index / max(len(vector_objects) - 1, 1)
+            for index in range(len(vector_objects))
+        ],
+    )
+    for entry, vector, line_color in zip(
+        vector_objects,
+        vectors,
+        line_colors,
+        strict=True,
+    ):
+        vector_fig.add_trace(
+            go.Scattergl(
+                x=vector_dimensions,
+                y=vector,
+                mode="lines",
+                name=entry["name"],
+                showlegend=True,
+                legendgroup=entry["id"],
+                hovertemplate=(
+                    "<b>%{fullData.name}</b><br>"
+                    "Dimension: %{x}<br>"
+                    "Wert: %{y:.4f}<extra></extra>"
+                ),
+                line={"color": line_color, "width": 1},
+            )
+        )
+    vector_fig.update_layout(
+        title="Embedding-Werte im Vektorraum",
+        xaxis_title="Vektordimension",
+        yaxis_title="Vektorwert",
+        hovermode="closest",
+        legend={
+            "orientation": "v",
+            "x": 1.02,
+            "xanchor": "left",
+            "y": 1,
+            "yanchor": "top",
+            "groupclick": "togglegroup",
+        },
+        margin={"l": 20, "r": 180, "t": 55, "b": 20},
+    )
+    st.plotly_chart(apply_chart_style(vector_fig, height=360), width="stretch")
 
     if search_results:
         st.subheader("Tatsächliches Suchranking")
